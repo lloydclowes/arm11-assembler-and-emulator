@@ -1,0 +1,34 @@
+
+Discarded input sections
+
+ .bss           0x0000000000000000        0x0 build/demo1.o
+ .ARM.attributes
+                0x0000000000000000       0x14 build/demo1.o
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+LOAD build/demo1.o
+
+.init
+ *(.init)
+
+.text           0x0000000000000000       0xec
+ *(.text)
+ .text          0x0000000000000000       0xec build/demo1.o
+                0x0000000000000000                SetForeColour
+                0x0000000000000014                SetGraphicsAddress
+                0x0000000000000020                DrawPixel
+                0x0000000000000068                DrawLine
+
+.data           0x00000000000000ec        0x8
+ *(.data)
+ .data          0x00000000000000ec        0x8 build/demo1.o
+
+/DISCARD/
+ *(*)
+OUTPUT(build/output.elf elf32-littlearm)

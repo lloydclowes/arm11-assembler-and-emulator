@@ -1,0 +1,86 @@
+\documentclass[a4paper]{article}
+
+%% Language and font encodings
+\usepackage[english]{babel}
+\usepackage[utf8x]{inputenc}
+\usepackage[T1]{fontenc}
+
+%% Sets page size and margins
+\usepackage[a4paper,top=2cm,bottom=2cm,left=2cm,right=2cm, marginparwidth=1.75cm]{geometry}
+
+%% Useful packages
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{titlesec}
+\usepackage[colorinlistoftodos]{todonotes}
+\usepackage[colorlinks=true, allcolors=blue]{hyperref}
+
+\titlespacing\section{0pt}{6pt}{2pt}
+\titlespacing\subsection{0pt}{6pt}{2pt}
+
+\title{Interim Checkpoint Report}
+\author{Group 37 - Lloyd Clowes, Hubert Kaluzny, Buneme Kyakilika, Jeewoo Kim}
+
+\begin{document}
+\maketitle
+
+\section{Project Structure}
+Out task was to build an emulator for the Raspberry Pi, which reads binary object code and simulates the execution of each 32-bit instruction.
+
+The ARM machine we are emulating is byte-addressable and can store up to 64KB (65536 bytes), so we allocated $2^{64}$ bytes of type uint8\_t. We read the binary object code file using the fread function to store each byte of instruction to memory ensuring that it was stored continuously.
+
+We also allocated 17 blocks of 4-bytes to represent the registers, using uint32\_t as the data type. The CPSR stores four status flags (N, Z, C and V), and is compared with the condition code in order to execute each instruction.
+
+We implemented the Three Stage Pipeline using 2 variables stored in the State structure - fetched and decoded. This allowed us to ensure that we were able to execute an instruction, then decode what was previously fetched, and fetch the next instruction from memory. After we execute a branch instruction, we fill the pipeline with the instructions that the updated PC points to.
+
+\section{Decoding}
+Our next task was to figure out a way of distinguishing the four instructions from each other.
+
+The decode function creates a new Instruction structure. This contains a field for every variable that could be needed by any of the four instructions, however it only initialises the fields which that particular instruction will need. It also has an enum that holds the type of instruction so that the execute function knows what fields to get from the structure when it starts running on the instruction.
+
+\subsection{Distinguishing the bits from one another}
+Our next task was to figure out a way of distinguishing the four instructions from each other. We accomplished this by looking at the bits of the instructions that stay constant. The diagram below shows the format of the instructions.
+
+To distinguish the Branch instruction from the others, we look at bit 27 of the instruction. If it is a 1, it is the branch instruction. Otherwise, we look at bit 26. If this is a 1, it is a Single Data Transfer Instruction. To try to distinguish the last two, we look at bits 4-7 (inclusive) of the instruction. If those bits are 1001, it is a multiply instruction. Otherwise it is a Data Processing instruction, because operand 2 in the data processing instruction will never contain 1001 in bits 4-7. We retrieved those bits from the instruction using the get\_between\_range function.
+
+Once we were able to distinguish the instructions from one another, we were able to split the task of implementing the four instructions between the four group members: Lloyd did the Data Processing instruction, Jeewoo did the Multiply instruction and shifts, Buneme did the Single Data Transfer instruction and Hubert did the Branch instruction and pipelines. Towards the end of Part 1 we split up working in pairs to fix some of the more challenging bugs.
+
+\section{Executing}
+Before starting to run any of the functions for each instruction, we must check that the condition code matches the currently stored flags in the CPSR. We use the check\_condition function to do this.
+
+\subsection{Data Processing}
+The first thing we do is run a switch statement on the OpCode. Inside each case we store the result of the operation that corresponds to the opcode. For tst, teq and cmp, the result is not written. For all the others, the result is written to the destination register. For arithmetic calculations, this carry bit is overwritten to be the carry out of the operation, and then stored in the temp\_c variable. We set the C flag to the value stored in temp\_c.
+
+Once this switch statement has finished, we check if the Set condition code flag is set. If it is, we run the set\_flags function, passing in the result of the operation and the state of the machine. This function retains the value of the V flag, sets the C flag to the value of temp\_c in the decoded instruction structure, sets the Z flag to 1 only if the result is all zeros, and sets the N flag to bit 31 of the result.
+
+\subsection{Multiply}
+
+This function calculates the value of register Rm multiplied with the value of register Rs and adds the value of register Rn if and only if the A (accumulate) bit is set. The flags are updated in the same way as described in Data Processing if the S bit is set.
+
+\subsection{Single Data Transfer}
+These instructions are used to load/store data from memory. The instruction also contains flags P and U. If P is 1 then we are pre-indexing, otherwise we are post-indexing. Since we are adding an offset to value in the base register, we need to ensure that the calculated address is within the bounds defined by the capacity of memory. If it isn’t, we produce an Out Of Bounds memory access error.
+Pre-index - The base register contains a memory address. The offset defined by the instruction code is added to the base register’s contents to give a new memory address. This gives us the address in memory of the data that we are loading from/storing into, depending on the value of P.
+Post-index -  According to the spec, we need to begin by ensuring that the values of the two registers are not equal. Assuming that they are not equal, we load/store data according to the values stored in te 2 registers. When storing data, it’s only once we have stored the data that we add/subtract the offset to the base register.
+the PC.
+
+\section{Challenges}
+Many of these bugs were the result of us misunderstanding the specification. This is why initially, the bugs were difficult to fix, but as we better understood what the specification required, it was easier to fix bugs in our code.
+
+Pre/Post indexing - The single data transfer instruction code defines whether or not the offset should be added to the base register before or after the transfer (see section on Single Data Transfer above). One of our bugs that we had to fix was introduced because we were not adding the offset at the right time when post-indexing was specified by the instruction code.
+Lots of the bugs in our code were small but hard to fix. These included, for example, forgetting breaks in switch statements, confusion about certain data types (especially uint8\_t/uint32\_t) and about when to use unsigned or signed data types.
+On multiple occasions, we had to read data from the virtual memory. However, initially we were only reading one byte from memory instead of all 4 bytes, which also introduced bugs into our code.
+
+\section{Working in a group}
+As a whole our group has worked quite well together. This is our first time using git properly, so it took us a while to be able to use it naturally so that we could coordinate our code. One thing that we can improve for next time is creating the header file before starting work on the main c file. This will allow us to know what parameters each function takes in, and what each one will return. A problem that occurred while making the emulator was that we started coding before we had a proper idea of the problem, so doing this will prevent it from happening next time.
+
+After Part 1 we are going to split the next 2 sections by parallelising our work. 2 of use will work on the extension, while the other 2 work on the assembler. Then we will spend a week or so putting together the work that we have produced separately.
+
+Fixing git merge conflicts, has been an issue, so in part 2 we will make sure that we are properly splitting the work, and not all working on the same parts of code.
+
+\section{Assembler}
+For the next part of the project we need to create an assembler. Lots of our functions from this part will be useful when working on part I. The most useful set of functions that we will reuse are contained in Utility.c. This contains useful functions such as getting bits within a specified range from an binary value, or getting a specific bit from a binary value.
+Furthermore, in our main function we have a section that reads data from a file passed via the command arguments. We will also need to reuse this code when we go onto the second part of this project.
+
+
+
+\end{document}

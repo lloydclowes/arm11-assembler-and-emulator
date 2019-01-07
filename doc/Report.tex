@@ -1,0 +1,181 @@
+\documentclass[a4paper]{article}
+
+%% Language and font encodings
+\usepackage[english]{babel}
+\usepackage[utf8x]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{listings}
+
+%% Sets page size and margins
+\usepackage[a4paper,top=6cm,bottom=6cm,left=3cm,right=3cm, marginparwidth=1.75cm]{geometry}
+
+
+
+%% Useful packages
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{titlesec}
+\usepackage[colorinlistoftodos]{todonotes}
+\usepackage[colorlinks=true, allcolors=blue]{hyperref}
+
+
+\titlespacing\section{0pt}{6pt}{4pt}
+\titlespacing\subsection{0pt}{6pt}{2pt}
+\titlespacing\subsubsection{0pt}{6pt}{2pt}
+
+\title{CO120.3 ARM Project}
+\author{Group 37 - Lloyd Clowes, Hubert Kaluzny, Buneme Kyakilika, Jeewoo Kim}
+
+\begin{document}
+\maketitle
+\section{Emulator}
+\subsection{Project Structure}
+Out task for Part I was to build an emulator for the Raspberry Pi, which reads binary object code and simulates the execution of each 32-bit instruction.
+
+The ARM machine we are emulating is byte-addressable and can store up to 64KB (65536 bytes), so we allocated $2^{64}$ bytes of type uint8\_t. We read the binary object code file using the fread function to store each byte of instruction to memory ensuring that it was stored continuously.
+
+We also allocated 17 blocks of 4-bytes to represent the registers, using uint32\_t as the data type. The CPSR stores four status flags (N, Z, C and V), and is compared with the condition code in order to execute each instruction.
+
+We implemented the Three Stage Pipeline using 2 variables stored in the State structure - fetched and decoded. This allowed us to ensure that we were able to execute an instruction, then decode what was previously fetched, and fetch the next instruction from memory. After we execute a branch instruction, we fill the pipeline with the instructions that the updated PC points to.
+\subsection{Decoding}
+Our next task was to figure out a way of distinguishing the four instructions from each other.
+
+The decode function creates a new Instruction structure. This contains a field for every variable that could be needed by any of the four instructions, however it only initialises the fields which that particular instruction will need. It also has an enum that holds the type of instruction so that the execute function knows what fields to get from the structure when it starts running on the instruction.
+
+\subsubsection{Distinguishing the bits from one another}
+Our next task was to figure out a way of distinguishing the four instructions from each other. We accomplished this by looking at the bits of the instructions that stay constant. The diagram below shows the format of the instructions.
+
+To distinguish the Branch instruction from the others, we look at bit 27 of the instruction. If it is a 1, it is the branch instruction. Otherwise, we look at bit 26. If this is a 1, it is a Single Data Transfer Instruction. To try to distinguish the last two, we look at bits 4-7 (inclusive) of the instruction. If those bits are 1001, it is a multiply instruction. Otherwise it is a Data Processing instruction, because operand 2 in the data processing instruction will never contain 1001 in bits 4-7. We retrieved those bits from the instruction using the get\_between\_range function.
+
+Once we were able to distinguish the instructions from one another, we were able to split the task of implementing the four instructions between the four group members: Lloyd did the Data Processing instruction, Jeewoo did the Multiply instruction and shifts, Buneme did the Single Data Transfer instruction and Hubert did the Branch instruction and pipelines. Towards the end of Part 1 we split up working in pairs to fix some of the more challenging bugs.
+
+\subsection{Executing}
+Before starting to run any of the functions for each instruction, we must check that the condition code matches the currently stored flags in the CPSR. We use the check\_condition function to do this.
+
+\subsubsection{Data Processing}
+The first thing we do is run a switch statement on the OpCode. Inside each case we store the result of the operation that corresponds to the opcode. For tst, teq and cmp, the result is not written. For all the others, the result is written to the destination register. For arithmetic calculations, this carry bit is overwritten to be the carry out of the operation, and then stored in the temp\_c variable. We set the C flag to the value stored in temp\_c.
+
+Once this switch statement has finished, we check if the Set condition code flag is set. If it is, we run the set\_flags function, passing in the result of the operation and the state of the machine. This function retains the value of the V flag, sets the C flag to the value of temp\_c in the decoded instruction structure, sets the Z flag to 1 only if the result is all zeros, and sets the N flag to bit 31 of the result.
+
+\subsubsection{Multiply}
+
+This function calculates the value of register Rm multiplied with the value of register Rs and adds the value of register Rn if and only if the A (accumulate) bit is set. The flags are updated in the same way as described in Data Processing if the S bit is set.
+
+\subsubsection{Single Data Transfer}
+These instructions are used to load/store data from memory. The instruction also contains flags P and U. If P is 1 then we are pre-indexing, otherwise we are post-indexing. Since we are adding an offset to value in the base register, we need to ensure that the calculated address is within the bounds defined by the capacity of memory. If it isn’t, we produce an Out Of Bounds memory access error.
+Pre-index - The base register contains a memory address. The offset defined by the instruction code is added to the base register’s contents to give a new memory address. This gives us the address in memory of the data that we are loading from/storing into, depending on the value of P.
+Post-index -  According to the spec, we need to begin by ensuring that the values of the two registers are not equal. Assuming that they are not equal, we load/store data according to the values stored in te 2 registers. When storing data, it’s only once we have stored the data that we add/subtract the offset to the base register.
+the PC.
+
+\section{Assembler}
+\subsection{Project Structure}
+
+\begin{enumerate}
+\item First pass - Reads the file and removes any empty lines or comments
+\item Second pass - Converting and outputting binary
+\item Adding large constants to the end of the file
+\end{enumerate}
+Our assembler begins by performing 2 passes. The first pass removes text that can be ignored such as comments and new lines, splits the line into tokens and loads it into an instruction struct. In the second pass we call a function that handles the struct, the label and constant map, switching through the instruction types and delegating work to other functions. It returns a 32-bit integer that we are able to write to the output file in binary mode. Finally we add to the end of the file any constants that will be too big to be stored in a register so that they can be loaded into memory by the processor.
+\subsection{Tokenizing Input}
+To split the assembly instructions up into more manageable size, we created a tokenizer function that takes in the instruction as a string, and first removes the ‘\_n’ at the end of the string (if there is one), and then tokenize it by the ‘[‘ character. This is done because there are a few different variations of the load and store instructions - one with just a numeric constant for the address, on with a base register in square brackets, one with a register and a constant in square brackets, etc. Everything after the square brackets is left as one string and is dealt with in the transfer function. We then tokenize it by the comma and space characters to split up the instruction so that it can be passed into the decode function for further processing.
+\subsection{Decoding Input}
+In the decode function, we first pass the first element of the list of tokens to the split\_opcode function, which splits the first argument so that the instruction structure holds the opcode, condition code, instruction type and stack mode separately so that they can easily be retrieved later on. For example, if it is passed 'stmgtfd’, it splits it up so that the instruction opcode is ‘stm’, the instruction type is STACK\_STORE (an enum value), the condition code is 12 (which is the condition code for ‘greater than’) and the stack mode is 'fd’.
+
+To determine the instruction type, we defined a 2D array of strings in assemble.h called Opcodes, where each element in the first-dimension is a list of opcodes for each instruction (so the first row has all the opcodes for Data Processing and the second has all the opcodes for Multiply, etc.), which is searched when trying to categorize the instruction. The instruction type is stored as an enum in an Instruction structure that contains all possible instruction fields (e.g. Cond, Rn, Offset, etc.). Once this is done, it sets the appropriate fields in the structure to the remaining tokenized strings.
+\subsection{Processing Instructions}
+The returned structure is then given to the to\_binary function, along with the two maps previously discussed. A switch statement is run on the instruction type, after which the instruction is then passed onto the appropriate function (e.g. if the type is MULTIPLY, it is passed onto the multiply function).
+
+Each of these functions have to decode some of the fields. For example, the register fields must be converted from a string that starts with the letter ‘r’ to an integer that obviously does not include the ‘r’. In addition, strings beginning with ‘\#’ or ‘=’ must be checked to see if they are negative or in hexadecimal representation (which is done by seeing if ‘0x’ is at the start of it) and then also converted to an integer.
+
+The transfer function must do different things depending on the type of instruction. If it is a load instruction, we set the L bit to 1 and then check if the first letter of the address is ‘=’. If it is, the P flag is set 1 to and we check if the value after the ‘=’ is less than 0xFF. If it is then we interpret the instruction as a data process (MOV).
+
+\section{The Extension}
+\subsection{Description}
+The extension that we chose to implement is a Raspberry Pi connected to a group of LEDs, that executes ARM programmes and uses the LEDs to display the depth of the stack at any given moment. In order to do this we had to implement additional features into our 
+assembler. These include:
+\newline
+\textbf{Branch Exchange (bx)} \newline
+This instruction takes a register as an argument and then branches to the memory address stored in the register at the time. This enabled functions to return back to the position they were called from. \newline
+\textbf{Branch with Link (bl)} \newline
+This instruction acts almost identical to the standard branch instruction set except it sets the link register (lr/register 14) to the memory address of the instruction strictly below the ‘bl’ instruction. This enabled the calling other functions as we were able to store the address of the instruction that was meant to be called after returning from a function. \newline
+\textbf{Stacks (pop, push, stm, ldm)} \newline
+The stack instruction set is able to load blocks of memory into a set of registers or load a set of registers into memory. This is done using a stack pointer which is able to determine the top of the stack at any point.
+pop\{cond\} \{reg\_list\} is the same as ldm\{cond\}ia sp!,\{reg\_list\}
+push\{cond\} \{reg\_list\} is the same as  stm\{cond\}db sp!,\{reg\_list\}
+Where sp is the stack pointer register (register 14). We allowed our assembler to support the full range of ldm/stm instructions as well as pop and push. 
+	This enabled support for calling multiple functions within functions as well as   
+recursion, as we were able to push the link register when entering a function and pop 
+when we are about to return.\newline
+\textbf{Comments and Indentation}\newline
+In order to be able to style our ARM source code better for easier reading, we implemented support for comments and indentations. \newline
+
+\textbf{Condition codes in instructions} \newline
+To make our implementation allow much more general instructions, we added support for condition codes to be added at the end of any instruction. This meant we could remove a special case for ‘andeq’ instructions and instead have it separated into and ‘and’ instruction with a condition code ‘eq’ (both of which correspond to 0 in binary), while allowing us to use more commands that only execute when the condition is met.\newline
+\bigskip
+We chose these so that we were able to write more complex ARM programs that we could assemble. Using the ARM instruction specification, we determined what the mnemonic assembly code should assemble into so that we were able to implement them in our assembler. In order to test our implementations we used the original specifications to determine specific outputs as well as a third party assembler. (http://armconverter.com/)
+In order to demonstrate the new instruction set of our assembler we wrote a program that uses the GPIO pins on the Raspberry Pi to display the current depth of the stack using LEDs.
+Pseudo Code:
+\begin{lstlisting}
+main:
+    func(0) 
+func (int x):
+    display(x)
+    func(x + 1)
+    display(x)
+end func
+\end{lstlisting}
+
+Where display(x) enables the correct GPIO pins to display integer x as a binary number using LEDs
+The source code to this program is located at programs/..s
+
+In raspberry pi, we can control each GPIO pins by manually changing the value stored in the memory address. For five output pins for this extension, we use GPIO pins 23, 24, 25, 27 and 22, so that we only need to change one memory address 0x2020 0008, which deals with GPIO pins from 20 to 29. In our assembly code, light function takes one input, converts it to binary and sets corresponding bits to 1.For example, if the given value is 20, which is 16 + 4, the program sets GPIO pin 22 and 25 as an output pin. In this case, we change bit 6 and bit 15 to 1. To light up LEDs, we set up each bits corresponding to each gpio pin number to 1 in memory address 0x2020 0040. We did the same in memory address 0x2020 0001C when we have to turn off the LEDs.
+In our assembly code, we used data processing, transfer, branch and tack instructions, and we also put indentation and comments to see whether our assembler compiles without errors. This code was compiled into binary code using our assembler, and ran successfully on Raspberry Pi.
+
+\section{High-level details of design}
+In order to implement the extension, we extended our assembler, this was done by developing additional functions that handle the cases for the new instructions being added to the set. We were able to use all of the structures already in place so that the integration of the new instruction set occurred seamlessly and had no effect on the performance of the origin instruction set, this also minimised the amount of work required to support the new instruction set which is a decision we made early on. 
+
+\section{Challenges and Problems Overcome}
+\subsection{Emulator}
+Many of these bugs were the result of us misunderstanding the specification. This is why initially, the bugs were difficult to fix, but as we better understood what the specification required, it was easier to fix bugs in our code.
+
+Pre/Post indexing - The single data transfer instruction code defines whether or not the offset should be added to the base register before or after the transfer (see section on Single Data Transfer above). One of our bugs that we had to fix was introduced because we were not adding the offset at the right time when post-indexing was specified by the instruction code.
+Lots of the bugs in our code were small but hard to fix. These included, for example, forgetting breaks in switch statements, confusion about certain data types (especially uint8\_t/uint32\_t) and about when to use unsigned or signed data types.
+On multiple occasions, we had to read data from the virtual memory. However, initially we were only reading one byte from memory instead of all 4 bytes, which also introduced bugs into our code.
+
+\subsection{Assembler}
+Initially we struggled with finding ideas for our extension project, we wanted to do something that would require video output. However we soon found out that there wasn’t a simple “printf” solution and that we would need to essentially write our own video drivers as we wouldn’t be able to use any operating system. In order to do that we would require complex function calls so we decided to extend our assemblers instruction set.
+
+At this point with the extended instruction set, we also hope to develop a number of things that we can present:
+Implement support for a small number of assembler directives
+With the help of the University of Cambridge ‘Baking Pi’ (https://www.cl.cam.ac.uk/projects/raspberrypi/tutorials/os/index.html) tutorial:
+Create a ‘postman’ that will allow us to communicate with the mailbox channels of the Raspberry Pi
+Create a frame buffer information structure that we can deliver to the graphics processor
+Receive a pointer from the graphics processor to the frame buffer
+Write to the frame buffer in order to be able to output actual images through the HDMI  output. 
+\section{Working in a group}
+As a whole our group has worked quite well together. This is our first time using git properly, so it took us a while to be able to use it naturally so that we could coordinate our code. One thing that we can improve for next time is creating the header file before starting work on the main c file. This will allow us to know what parameters each function takes in, and what each one will return. A problem that occurred while making the emulator was that we started coding before we had a proper idea of the problem, so doing this will prevent it from happening next time.
+
+After Part 1 we are going to split the next 2 sections by parallelising our work. 2 of use will work on the extension, while the other 2 work on the assembler. Then we will spend a week or so putting together the work that we have produced separately.
+
+Fixing git merge conflicts, has been an issue, so in part 2 we will make sure that we are properly splitting the work, and not all working on the same parts of code.
+
+\section{Group Reflection}
+\subsection{How well we communicated and split work}
+Throughout most of the project we worked in the same room so that we could communicate as easily as possible. The first things we did at the start of each section of the project was decide the structure of the program, declare the main functions so that we could start using them in our implementations and assume they have been implemented, and finally split up the tasks of implementing the main functions and assigning them to each person in the group. More specifically, each of us worked on one of the assembler functions for converting one of the instruction types (like data processing or multiply), as well as some of the utility functions.
+
+To make collaborating on the same project as easy and seamless as possible, we made a new branch on gitlab for any new feature we were working on and then branched it into the master branch once that feature had been successfully tested. This made working in a team much easier.
+
+\subsection{Things we would do differently/keep the same}
+One thing that we discovered soon after starting the emulator was that properly talking about the structure of the project before starting coding is extremely important when working in a team. For the emulator, we started coding before thinking too much about the structure, so we had to change the structure a lot (for example, the function declarations in the header file). However as soon as one of us changed that and someone else merged with master from an older version of the project, all the changes to the structure were overwritten back to the old version, meaning we had to cherry-pick a lot of code. We did a much better job of this with the assembler however, meaning we had no major problems like to this, however in the future we hope to keep the structure of the codebase in much better shape. For both the emulator and the assembler we initially began all coding in the same file, and eventually towards the end we finally decided to split the codebase into modules so that it was simpler to read and manage. 
+
+\section{Individual Reflections}
+\subsection{Lloyd}
+I think that all of us, myself included, were given many tasks that meant we all felt responsible for part of the project. As the group leader, I had to make sure we split up the project between the four of us as evenly as possible. I tried to include everyone as much as possible by making sure everyone’s input was heard by the rest of the group so that everyone felt comfortable saying their ideas out loud.
+\subsection{Jeewoo}
+This project was a good experience to me in many ways. Throughout this project, I got used to allocating memory space for pointers in C programs, and to using git to cooperate with other team members properly. In addition, I’m now familiar with gdb and valgrind, which were really helpful in catching segmentation fault errors in our assembler code. Whilst designing and making this huge program with C, I learned the importance of program structure and memory allocation and usage. Writing assembly code for our extension was also a good experience to apply the knowledge I gained from the Architecture module. I hope this experience will be very useful for future projects, especially for the pintos project in the next year.
+\subsection{Hubert}
+I believe I fitted well into my team, I established the design for our assembler which allowed my team to quickly get working individually on it’s various parts. I also helped with debugging our implementations and restructuring our codebase so that it was easier to read and manage. As we all knew each other quite well beforehand I think it was much easier for everyone to take lead with certain challenges as we were comfortable with doing so. In the future I hope to bring what I have learned to other projects, so that from the beginning we are able to easily solve problems at hand.
+\subsection{Buneme}
+I think I worked well as part of this team. The workload was split well between all the team members, which allowed us all to focus on implementing the various features that were assigned to us. This was a positive learning experience for me because this project taught me how to use gdb and valgrind to fix bugs and locate memory leaks. Because of this, if we were to do a similar project again, I would make extensive use of gdb and valgrind when solving issues with the code. However, I would also make sure that we fixed memory leaks as we went along by freeing up variables, rather than leaving the leak fixing to be done at the end of the project. This is because memory leaks built up very quickly, making them harder to fix at the end of the project.
+\end{document}
+
